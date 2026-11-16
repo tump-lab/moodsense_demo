@@ -11,7 +11,9 @@ MoodSense is a research prototype, not a medical device.
 
 ## Demo video
 
-https://github.com/user-attachments/assets/6522f61d-cd28-492b-a25e-ff561be6c005
+https://github.com/user-attachments/assets/fb9c23b7-c7a2-4545-9504-d58c42fc8cd6
+
+If the player above does not load, download or open the video directly: [media/demo.mp4](media/demo.mp4)
 
 ## Try the app
 
