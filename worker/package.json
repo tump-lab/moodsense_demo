@@ -1,0 +1,16 @@
+{
+  "name": "moodsense-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker: Claude proxy, hourly community aggregation, and remote-data deletion for MoodSense",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261113.1",
+    "typescript": "~6.0.3",
+    "wrangler": "^4.0.0"
+  }
+}

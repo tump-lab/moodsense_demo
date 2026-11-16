@@ -1,0 +1,67 @@
+{
+  "indexes": [
+    {
+      "//": "Backs accountDay.ts' collectionGroup('events') query: one account's sensing rows across every device, narrowed to a local-day window. COLLECTION_GROUP scope (not COLLECTION) because the query spans sensing/*/events for every deviceId. Deploy with: firebase deploy --only firestore:indexes",
+      "collectionGroup": "events",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "ts",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "//": "Withdrawal deletes a participant's group-room messages with a collectionGroup('messages') query on uid (worker/src/withdraw.ts).",
+      "collectionGroup": "messages",
+      "fieldPath": "uid",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "arrayConfig": "CONTAINS",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "//": "Withdrawal deletes a participant's group-room members with a collectionGroup('members') query on uid (worker/src/withdraw.ts).",
+      "collectionGroup": "members",
+      "fieldPath": "uid",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "arrayConfig": "CONTAINS",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    }
+  ]
+}

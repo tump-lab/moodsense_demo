@@ -1,0 +1,30 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <!-- Android 14+: a `health` foreground service needs this plus ACTIVITY_RECOGNITION granted at runtime. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH"/>
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+  <uses-permission android:name="android.permission.WAKE_LOCK"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+  <application>
+    <service
+      android:name="expo.modules.moodsensebackgroundsensing.SensingService"
+      android:exported="false"
+      android:foregroundServiceType="health"/>
+
+    <receiver
+      android:name="expo.modules.moodsensebackgroundsensing.BurstAlarmReceiver"
+      android:exported="false"/>
+
+    <!-- Exported because the system sends these; both are exempt from background foreground-service start limits. -->
+    <receiver
+      android:name="expo.modules.moodsensebackgroundsensing.BootReceiver"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED"/>
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

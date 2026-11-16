@@ -1,0 +1,121 @@
+diff --git a/node_modules/react-native-app-usage/android/src/main/java/com/appusage/AppUsageModule.java b/node_modules/react-native-app-usage/android/src/main/java/com/appusage/AppUsageModule.java
+index 831de0a..876bec5 100644
+--- a/node_modules/react-native-app-usage/android/src/main/java/com/appusage/AppUsageModule.java
++++ b/node_modules/react-native-app-usage/android/src/main/java/com/appusage/AppUsageModule.java
+@@ -1,6 +1,7 @@
+ package com.appusage;
+ 
+ import android.app.AppOpsManager;
++import android.app.usage.UsageEvents;
+ import android.app.usage.UsageStats;
+ import android.app.usage.UsageStatsManager;
+ import android.content.Context;
+@@ -98,6 +99,79 @@ public class AppUsageModule extends ReactContextBaseJavaModule {
+ 
+   }
+ 
++  /**
++   * Raw UsageStatsManager events in [startTime, endTime), as
++   * {type, ts, packageName?} maps.
++   *
++   * queryAndAggregateUsageStats (above) only reports per-package totals, so
++   * it can say how long the phone was in an app but nothing about *when* the
++   * screen woke, whether the keyguard was passed, or how one long session
++   * differs from thirty short ones. queryEvents carries all of that, under
++   * the same Usage Access permission the caller already holds - no extra
++   * permission and no BroadcastReceiver or foreground service.
++   *
++   * Event ints are written as literals rather than UsageEvents.Event
++   * constants: SCREEN_INTERACTIVE and friends were added in API 28 and the
++   * foreground-service ones in API 29, so referencing the constants ties
++   * this file to a compileSdk. The values are stable public API.
++   */
++  @ReactMethod
++  public void getUsageEvents(String startTime, String endTime, Callback callback) {
++    WritableArray out = Arguments.createArray();
++    try {
++      long start = Long.parseLong(startTime);
++      long end = Long.parseLong(endTime);
++      usageStatsManager = (UsageStatsManager) getReactApplicationContext()
++        .getSystemService(Context.USAGE_STATS_SERVICE);
++      UsageEvents events = usageStatsManager.queryEvents(start, end);
++      UsageEvents.Event event = new UsageEvents.Event();
++      while (events.hasNextEvent()) {
++        events.getNextEvent(event);
++        String name = eventTypeName(event.getEventType());
++        if (name == null) {
++          continue;
++        }
++        WritableMap map = Arguments.createMap();
++        map.putString("type", name);
++        map.putDouble("ts", (double) event.getTimeStamp());
++        String pkg = event.getPackageName();
++        if (pkg != null) {
++          map.putString("packageName", pkg);
++        }
++        out.pushMap(map);
++      }
++    } catch (Exception e) {
++      // A device that refuses the query (permission revoked mid-session, OEM
++      // quirk) hands back an empty list rather than rejecting: the caller
++      // treats "no events" as "this source has nothing", which is true.
++      Log.w("getUsageEvents", "queryEvents failed", e);
++    }
++    callback.invoke(out);
++  }
++
++  private static String eventTypeName(int type) {
++    switch (type) {
++      case 1: // ACTIVITY_RESUMED (MOVE_TO_FOREGROUND before API 29)
++        return "activity_resumed";
++      case 2: // ACTIVITY_PAUSED (MOVE_TO_BACKGROUND before API 29)
++        return "activity_paused";
++      case 15: // SCREEN_INTERACTIVE, API 28+
++        return "screen_interactive";
++      case 16: // SCREEN_NON_INTERACTIVE, API 28+
++        return "screen_non_interactive";
++      case 17: // KEYGUARD_SHOWN, API 28+
++        return "keyguard_shown";
++      case 18: // KEYGUARD_HIDDEN, API 28+
++        return "keyguard_hidden";
++      case 19: // FOREGROUND_SERVICE_START, API 29+
++        return "foreground_service_start";
++      case 20: // FOREGROUND_SERVICE_STOP, API 29+
++        return "foreground_service_stop";
++      default:
++        return null;
++    }
++  }
++
+   @ReactMethod
+   public void checkPackagePermission(Promise promise) {
+ //    promise.resolve(1);
+diff --git a/node_modules/react-native-app-usage/lib/index.d.ts b/node_modules/react-native-app-usage/lib/index.d.ts
+index f07757d..24982c8 100644
+--- a/node_modules/react-native-app-usage/lib/index.d.ts
++++ b/node_modules/react-native-app-usage/lib/index.d.ts
+@@ -2,3 +2,4 @@ export declare function checkPackagePermission(): Promise<boolean>;
+ export declare function requestUsagePermission():void;
+ export declare function getUsageLast24Hr(callBack):void;
+ export declare function getUsageCustomRange(startTime,endTime,callBack):void;
++export declare function getUsageEvents(startTime,endTime,callBack):void;
+diff --git a/node_modules/react-native-app-usage/src/index.tsx b/node_modules/react-native-app-usage/src/index.tsx
+index 6a725d6..ec7052c 100644
+--- a/node_modules/react-native-app-usage/src/index.tsx
++++ b/node_modules/react-native-app-usage/src/index.tsx
+@@ -29,6 +29,9 @@ export function getUsageLast24Hr(callBack:any) {
+ export function getUsageCustomRange(startTime:String,endTime:String, callBack:any) {
+   return AppUsage.getUsageCustomRange(startTime,endTime,callBack);
+ }
++export function getUsageEvents(startTime:String,endTime:String, callBack:any) {
++  return AppUsage.getUsageEvents(startTime,endTime,callBack);
++}
+ export function checkPackagePermission(): Promise<boolean> {
+   return AppUsage.checkPackagePermission();
+ }
+@@ -36,4 +39,4 @@ export function requestUsagePermission(): void {
+   return AppUsage.requestUsagePermission();
+ }
+ 
+-export default {multiply,subtract,checkPackagePermission,getUsageLast24Hr,getUsageCustomRange,requestUsagePermission}
++export default {multiply,subtract,checkPackagePermission,getUsageLast24Hr,getUsageCustomRange,getUsageEvents,requestUsagePermission}

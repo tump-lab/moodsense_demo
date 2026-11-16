@@ -1,0 +1,46 @@
+diff --git a/node_modules/expo/ios/AppDelegates/ExpoReactNativeFactory.mm b/node_modules/expo/ios/AppDelegates/ExpoReactNativeFactory.mm
+index ed88404..2ac58f7 100644
+--- a/node_modules/expo/ios/AppDelegates/ExpoReactNativeFactory.mm
++++ b/node_modules/expo/ios/AppDelegates/ExpoReactNativeFactory.mm
+@@ -39,7 +39,22 @@ - (void)hostDidStart:(nonnull RCTHost *)host
+ // [JS thread]
+ - (void)host:(nonnull RCTHost *)host didInitializeRuntime:(facebook::jsi::Runtime &)runtime
+ {
+-  _appContext = [[EXAppContext alloc] init];
++  // Reloads can overlap: this runs on the JS thread of the instance coming up, while
++  // older instances are still tearing down, so two JS threads can land here at once.
++  // Keep this call's context in a local strong reference and only publish it to the
++  // ivar under a lock - otherwise the other thread's assignment deallocates the
++  // context this call is still preparing, and `setRuntime` below reaches into freed
++  // memory. The previous context is released after the swap and outside the lock,
++  // because its deinit tears modules down and can call back into JS.
++  EXAppContext *appContext = [[EXAppContext alloc] init];
++  EXAppContext *previousAppContext = nil;
++
++  @synchronized (self) {
++    previousAppContext = _appContext;
++    _appContext = appContext;
++  }
++
++  previousAppContext = nil;
+ 
+   // Resolve the React runtime scheduler so ExpoModulesJSI can dispatch work onto
+   // the JS thread. Doing it here (rather than inside the xcframework) keeps
+@@ -59,12 +74,12 @@ - (void)host:(nonnull RCTHost *)host didInitializeRuntime:(facebook::jsi::Runtim
+   auto scheduler = binding ? binding->getRuntimeScheduler() : nullptr;
+   void *schedulerHandle = expo::createReactSchedulerHandle(scheduler);
+ 
+-  [_appContext setRuntime:&runtime
+-                scheduler:schedulerHandle
+-                 dispatch:schedulerHandle ? reinterpret_cast<const void *>(&expo::dispatchOnReactScheduler) : nullptr];
+-  [_appContext setHostWrapper:[[EXHostWrapper alloc] initWithHost:host]];
++  [appContext setRuntime:&runtime
++               scheduler:schedulerHandle
++                dispatch:schedulerHandle ? reinterpret_cast<const void *>(&expo::dispatchOnReactScheduler) : nullptr];
++  [appContext setHostWrapper:[[EXHostWrapper alloc] initWithHost:host]];
+ 
+-  [_appContext registerNativeModules];
++  [appContext registerNativeModules];
+ }
+ 
+ @end

@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["MoodSenseBackgroundSensingModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.moodsensebackgroundsensing.MoodSenseBackgroundSensingModule"]
+  }
+}

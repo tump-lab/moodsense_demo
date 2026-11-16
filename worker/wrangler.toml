@@ -1,0 +1,15 @@
+name = "moodsense-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# Hourly community aggregation.
+[triggers]
+crons = ["0 * * * *"]
+
+[vars]
+FIREBASE_PROJECT_ID = "modesense-4c979"
+FIREBASE_STORAGE_BUCKET = "modesense-4c979.firebasestorage.app"
+
+# Secrets (never committed), set with `wrangler secret put <NAME>`:
+#   ANTHROPIC_API_KEY          the Claude API key
+#   FIREBASE_SERVICE_ACCOUNT   the whole service-account JSON (Firestore + Storage access)

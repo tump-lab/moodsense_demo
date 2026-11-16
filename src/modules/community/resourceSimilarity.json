@@ -1,0 +1,86 @@
+{
+  "crisis-text-line": {
+    "calm": 0.287,
+    "good": 0.277,
+    "low": 0.41,
+    "stressed": 0.346,
+    "tired": 0.103
+  },
+  "findahelpline": {
+    "calm": 0.181,
+    "good": 0.222,
+    "low": 0.217,
+    "stressed": 0.187,
+    "tired": 0.016
+  },
+  "findtreatment": {
+    "calm": 0.392,
+    "good": 0.271,
+    "low": 0.452,
+    "stressed": 0.331,
+    "tired": 0.188
+  },
+  "mha-connect": {
+    "calm": 0.31,
+    "good": 0.36,
+    "low": 0.364,
+    "stressed": 0.234,
+    "tired": 0.104
+  },
+  "mha-getting-help": {
+    "calm": 0.343,
+    "good": 0.258,
+    "low": 0.345,
+    "stressed": 0.305,
+    "tired": 0.14
+  },
+  "mhawv-programs": {
+    "calm": 0.309,
+    "good": 0.339,
+    "low": 0.255,
+    "stressed": 0.202,
+    "tired": 0.073
+  },
+  "mhawv-screening": {
+    "calm": 0.383,
+    "good": 0.265,
+    "low": 0.27,
+    "stressed": 0.233,
+    "tired": 0.111
+  },
+  "nami-helpline": {
+    "calm": 0.323,
+    "good": 0.271,
+    "low": 0.384,
+    "stressed": 0.332,
+    "tired": 0.143
+  },
+  "purdue-caps": {
+    "calm": 0.224,
+    "good": 0.228,
+    "low": 0.247,
+    "stressed": 0.263,
+    "tired": 0.057
+  },
+  "sg-mindline-1771": {
+    "calm": 0.506,
+    "good": 0.251,
+    "low": 0.402,
+    "stressed": 0.422,
+    "tired": 0.225
+  },
+  "sg-mindline-tools": {
+    "calm": 0.464,
+    "good": 0.301,
+    "low": 0.345,
+    "stressed": 0.357,
+    "tired": 0.187
+  },
+  "sg-moh-services": {
+    "calm": 0.333,
+    "good": 0.218,
+    "low": 0.268,
+    "stressed": 0.257,
+    "tired": 0.137
+  }
+}

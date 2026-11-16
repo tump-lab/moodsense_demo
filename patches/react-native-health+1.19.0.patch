@@ -1,0 +1,21 @@
+diff --git a/node_modules/react-native-health/RCTAppleHealthKit/RCTAppleHealthKit.m b/node_modules/react-native-health/RCTAppleHealthKit/RCTAppleHealthKit.m
+index e8ddce1..0033206 100644
+--- a/node_modules/react-native-health/RCTAppleHealthKit/RCTAppleHealthKit.m
++++ b/node_modules/react-native-health/RCTAppleHealthKit/RCTAppleHealthKit.m
+@@ -840,8 +840,16 @@ -(void)startObserving {
+ 
+ - (void)emitEventInternal:(NSNotification *)notification {
+   if (self.hasListeners) {
++#ifndef RCT_REMOVE_LEGACY_ARCH
++    // Legacy (bridge) architecture only: this module is a singleton, so the
++    // instance handed the notification may not be the one the bridge injected
++    // callableJSModules into. Re-point it at a shared invoker backed by the
++    // bridge. Under the bridgeless architecture RCTCallableJSModules has no
++    // -setBridge: and the invoker injected by the TurboModule registry is
++    // already the correct one, so leave it alone.
+     self.callableJSModules = [RCTAppleHealthKit sharedJsModule];
+     [self.callableJSModules setBridge:self.bridge];
++#endif // RCT_REMOVE_LEGACY_ARCH
+     [self sendEventWithName:notification.name
+                    body:notification.userInfo];
+   }

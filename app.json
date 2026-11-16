@@ -1,0 +1,85 @@
+{
+  "expo": {
+    "name": "MoodSense",
+    "slug": "moodsense",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.moodsense",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "MoodSense records short voice notes only when you choose to speak to the companion. Recordings stay on your device unless you agreed to share them.",
+        "NSMotionUsageDescription": "MoodSense uses motion and activity data (for example, step-like movement from the accelerometer) to see how your movement lines up with how you feel. You can turn this off at any time.",
+        "NSHealthShareUsageDescription": "MoodSense collects your heart rate, heart rate variability, breathing rate, blood oxygen, steps, workouts, mindful minutes and sleep, and uses them to show how your body's signals line up with how you have been feeling. Nothing is written back to Health. Your data is stored on your device and uploaded under a random device ID, never your name, and is never used for advertising or sold. You can turn health collection off at any time in MoodSense Settings.",
+        "NSHealthUpdateUsageDescription": "MoodSense never writes anything to Health. This line appears only because the health library asks for one; every request MoodSense makes is read-only, and you can turn health collection off at any time in MoodSense Settings.",
+        "NSCalendarsUsageDescription": "MoodSense adds a support group you join to your calendar, only when you tap Join. It does not read your calendar.",
+        "NSRemindersUsageDescription": "MoodSense does not use your reminders. This line appears only because the calendar library asks for one.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.anonymous.moodsense",
+      "adaptiveIcon": {
+        "backgroundColor": "#FAF6EE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACTIVITY_RECOGNITION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_HEART_RATE_VARIABILITY",
+        "android.permission.health.READ_RESTING_HEART_RATE",
+        "android.permission.health.READ_RESPIRATORY_RATE",
+        "android.permission.health.READ_OXYGEN_SATURATION",
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_EXERCISE",
+        "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND",
+        "android.permission.PACKAGE_USAGE_STATS",
+        "android.permission.GET_INSTALLED_APPS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-audio",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "expo-asset",
+      "expo-background-task",
+      "react-native-health",
+      "./plugins/with-healthkit-background-delivery.js",
+      "react-native-health-connect",
+      "./plugins/with-health-connect-permission-delegate.js",
+      "./plugins/with-ios-screen-time.js",
+      "./plugins/with-ios-call-keepalive.js",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.943852161689-17jctgr9gt4ibn3tg0su7d796ffo88ur"
+        }
+      ],
+      "expo-localization"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "14b38c06-2203-40e7-bae1-2c723041e565"
+      }
+    }
+  }
+}

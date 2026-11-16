@@ -1,0 +1,29 @@
+rules_version = '2';
+
+// Storage rules for companion chat voice notes: a participant can read and write only their own files.
+// The research dashboard and export scripts use the Admin SDK, which skips these rules.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // users/{uid}/voice_notes/{ts}.m4a — one object per voice message,
+    // keyed by the same timestamp as its Firestore chat_messages doc.
+    match /users/{uid}/voice_notes/{fileName} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+
+      // Recordings are create-only research data, limited to audio under 25 MB as an abuse guard.
+      // `resource == null` is what blocks overwrites, because Storage treats an overwrite as a create, not an update.
+      allow create: if request.auth != null
+                    && request.auth.uid == uid
+                    && resource == null
+                    && request.resource.size < 25 * 1024 * 1024
+                    && request.resource.contentType.matches('audio/.*');
+
+      allow update, delete: if false;
+    }
+
+    // Everything else is closed; add an explicit match above to open a path.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
