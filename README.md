@@ -4,8 +4,7 @@ A mobile mental health app for community awareness, support, and
 intervention. Users check in on their mood, see how their community is
 doing, join support groups, and get small activities matched to how they
 feel.
-
-MoodSense is a research prototype, not a medical device.
+ 
 
 ![MoodSense overview: multimodal check-ins feed a community-centered design (awareness, support, context-aware intervention), with supporting features for history and personal insights](docs/images/overview.png)
 
