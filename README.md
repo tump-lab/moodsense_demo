@@ -18,13 +18,10 @@ If the player above does not load, download or open the video directly: [media/d
 ## Try the app
 
 - **Android:** download the APK from
-  [Releases](https://github.com/tump-lab/moodesense_v1/releases/tag/android-v1.0.0-8),
-  open it on your phone, and allow installation when asked.
-  Sign up with email and password.
-- **iOS:** install [TestFlight](https://apps.apple.com/app/testflight/id899247664)
-  from the App Store, then open
-  [testflight.apple.com/join/NVpfj4MK](https://testflight.apple.com/join/NVpfj4MK)
-  on your iPhone. Sign up with email and password.
+  [Releases](https://github.com/tump-lab/moodesense_v1/releases/tag/android-v1.0.0-8) and install it.
+- **iOS:** public TestFlight beta is pending App Review; the link will be added once approved.
+
+Sign up with email and password.
 
 ## Code
 
