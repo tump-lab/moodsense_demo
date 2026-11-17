@@ -6,13 +6,15 @@ doing, join support groups, and get small activities matched to how they
 feel.
  
 
-![MoodSense overview: multimodal check-ins feed a community-centered design (awareness, support, context-aware intervention), with supporting features for history and personal insights](docs/images/overview.png)
+<p align="center">
+  <img src="docs/images/overview.png" width="420" alt="MoodSense overview: multimodal check-ins feed a community-centered design (awareness, support, context-aware intervention), with supporting features for history and personal insights">
+</p>
 
 ## Demo video
 
-https://github.com/user-attachments/assets/fb9c23b7-c7a2-4545-9504-d58c42fc8cd6
-
-If the player above does not load, download or open the video directly: [media/demo.mp4](media/demo.mp4)
+<p align="center">
+  <a href="media/demo.mp4"><img src="docs/images/demo-thumbnail.png" width="480" alt="MoodSense demo video (click to play)"></a>
+</p>
 
 ## Try the app
 
