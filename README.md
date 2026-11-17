@@ -20,6 +20,7 @@ If the player above does not load, download or open the video directly: [media/d
 - **Android:** download the APK from
   [Releases](https://github.com/tump-lab/moodesense_v1/releases/tag/android-v1.0.0-8) and install it.
 - **iOS:** public TestFlight beta is pending App Review; the link will be added once approved.
+  Internal TestFlight testing is available by invitation on request.
 
 Sign up with email and password.
 
