@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
-import { Card, EmptyState } from '../../components';
+import { AppButton, Card } from '../../components';
 import { colors, radius, spacing, type } from '../../theme';
 import { MASCOT_NAMES } from './mascotRoster';
 import { MoodMascot, useMascotOnDuty } from './MoodMascot';
@@ -28,6 +28,11 @@ const RANGES = [
   { days: 14, label: '2 Weeks' },
   { days: 30, label: 'Month' },
 ] as const;
+
+/** Shared days before the card shows a guess for tomorrow; one or two days are too few to read from. */
+const FORECAST_AFTER = 3;
+/** Shared days before that guess loses its "early guess" label. */
+const SETTLED_AFTER = 7;
 
 const PLOT_H = 120;
 const PAD_Y = 10;
@@ -85,7 +90,8 @@ const AXIS_CAPTION = 'Up the chart is a lighter day, down is a heavier one.';
  * The long form names the day in a sentence; the short form goes under the chart, where the two end
  * labels sit about a step apart and "Today"/"Tmrw" were wide enough at caption size to run into each
  * other. "Now"/"Next" fit inside one step, and the x-label box is capped at a step as well, so the
- * labels cannot overlap at any width.
+ * labels cannot overlap at any width. Weekdays are abbreviated ("Sat", "Wed") for the same reason:
+ * full names like "Wednesday" had to shrink to unreadable sizes to fit a week's step.
  */
 function dayLabel(date: string, ahead: boolean, isToday: boolean, long: boolean): string {
   if (ahead) return long ? 'Tomorrow' : 'Next';
@@ -94,7 +100,7 @@ function dayLabel(date: string, ahead: boolean, isToday: boolean, long: boolean)
   const dt = new Date(y, m - 1, d);
   return long
     ? dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-    : dt.toLocaleDateString('en-US', { weekday: 'long' });
+    : dt.toLocaleDateString('en-US', { weekday: 'short' });
 }
 
 function describe(p: TrendPoint, isToday: boolean): string {
@@ -122,7 +128,73 @@ function linePath(xs: number[], ys: Array<number | null>): string {
   return d.trim();
 }
 
-export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
+/** The week a new account is about to fill: six days before today, then today. */
+function blankWeek(today = new Date()): { key: string; label: string; isToday: boolean }[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const dt = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (6 - i));
+    return {
+      key: dt.toDateString(),
+      label: i === 6 ? 'Today' : dt.toLocaleDateString('en-US', { weekday: 'short' }),
+      isToday: i === 6,
+    };
+  });
+}
+
+/**
+ * First visit: no line, no forecast. Seven empty slots show where the days will go, today's slot
+ * is marked, and the one thing to do next — share today — is a button, not a sentence.
+ */
+function FirstWeek({ onStartCheckIn }: { onStartCheckIn?: () => void }) {
+  const week = useMemo(() => blankWeek(), []);
+  return (
+    <View style={styles.first}>
+      <View
+        style={styles.firstRow}
+        accessible
+        accessibilityLabel="An empty week. Your first check-in adds today."
+      >
+        {week.map((d) => (
+          <View key={d.key} style={styles.firstSlot}>
+            <View style={[styles.firstDot, d.isToday && styles.firstDotToday]} />
+            <Text
+              numberOfLines={1}
+              style={[styles.firstLabel, d.isToday && styles.firstLabelToday]}
+            >
+              {d.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+      <Text style={styles.firstMessage}>
+        Share how today feels and your first dot appears here. After a few days you will see your
+        week take shape.
+      </Text>
+      {onStartCheckIn && (
+        <AppButton
+          title="Check in today"
+          variant="ghost"
+          onPress={onStartCheckIn}
+          style={styles.firstAction}
+        />
+      )}
+    </View>
+  );
+}
+
+export function WellbeingTrendCard({
+  series,
+  onStartCheckIn,
+  syncing = false,
+}: {
+  series: TrendSeries | null;
+  /**
+   * True while the account's past check-ins may still be on their way down from the cloud. An empty
+   * series then means "not here yet", not "never checked in", so the card shows a loading state.
+   */
+  syncing?: boolean;
+  /** Takes a new account to today's check-in; the card only shows the button when this is given. */
+  onStartCheckIn?: () => void;
+}) {
   const [days, setDays] = useState<number>(7);
   const [width, setWidth] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
@@ -130,8 +202,24 @@ export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
   const [held, setHeld] = useState<string | null>(null);
   const mascot = useMascotOnDuty();
 
+  /**
+   * Whether there is anything to chart yet. `?? hasFelt` covers a series cached by a build from
+   * before `everFelt` existed, the same reason `basis` is guarded below.
+   */
+  const everFelt = series?.everFelt ?? series?.hasFelt ?? false;
+  // A series cached before `feltDays` existed belongs to an account that was already charting, so
+  // it is treated as past the early days rather than suddenly losing its forecast.
+  const feltDays = series?.feltDays ?? (everFelt ? SETTLED_AFTER : 0);
+  /** One or two shared days: plot them, but no forecast and no longer ranges yet. */
+  const early = everFelt && feltDays < FORECAST_AFTER;
+  /** Forecast is shown but still labelled as a first guess. */
+  const learning = !early && feltDays < SETTLED_AFTER;
+
   const shown = useMemo(() => (series ? sliceSeries(series, days) : null), [series, days]);
-  const points = shown?.points ?? [];
+  const points = useMemo(
+    () => (early ? (shown?.points ?? []).filter((p) => !p.ahead) : shown?.points ?? []),
+    [shown, early]
+  );
   const past = points.filter((p) => !p.ahead);
   const todayKey = past[past.length - 1]?.date ?? null;
 
@@ -146,11 +234,13 @@ export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
     return { xs, y: plotY, step, boxW };
   }, [width, points]);
 
-  /**
-   * Whether there is anything to chart yet. `?? hasFelt` covers a series cached by a build from
-   * before `everFelt` existed, the same reason `basis` is guarded below.
-   */
-  const everFelt = series?.everFelt ?? series?.hasFelt ?? false;
+  /** Nothing on this phone yet, but the cloud has not been asked: could be a returning account. */
+  const loadingPast = series != null && !everFelt && syncing;
+  const headerLine = !shown || loadingPast
+    ? 'Gathering your days…'
+    : early
+      ? `You've shared ${feltDays} ${feltDays === 1 ? 'day' : 'days'} so far. — ${MASCOT_NAMES[mascot]}`
+      : companionLine(shown, MASCOT_NAMES[mascot]);
 
   const picked = points.find((p) => p.date === selected) ?? null;
   // `basis` is guarded rather than assumed: points come back through a serialised cache, so a
@@ -166,47 +256,54 @@ export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
         accessibilityLabel={
           shown == null
             ? "How you have been. Loading."
+            : early
+              ? `How you have been. ${headerLine} ${AXIS_CAPTION}`
             : everFelt
-              ? `How you have been. ${companionLine(shown, MASCOT_NAMES[mascot])} ${AXIS_CAPTION} ${trendSummary(shown)}`
+              ? `How you have been. ${headerLine} ${AXIS_CAPTION} ${trendSummary(shown)}`
               // No chart below yet, so the axis and the tomorrow reading would be describing
               // something that is not on screen.
-              : `How you have been. ${companionLine(shown, MASCOT_NAMES[mascot])}`
+              : `How you have been. ${headerLine}`
         }
       >
         <MoodMascot mood="calm" mascot={mascot} size={36} />
         <View style={styles.headerText}>
           <Text style={styles.title}>How You Have Been</Text>
           <Text style={styles.line} numberOfLines={1}>
-            {shown ? companionLine(shown, MASCOT_NAMES[mascot]) : 'Gathering your days…'}
+            {headerLine}
           </Text>
         </View>
       </View>
 
-      {series && !everFelt ? (
+      {loadingPast ? (
+        <View style={styles.loading} accessible accessibilityLabel="Loading your past days">
+          <ActivityIndicator color={FELT} />
+          <Text style={styles.loadingText}>Bringing back your past days…</Text>
+        </View>
+      ) : series && !everFelt ? (
         /* A new account has no shared days and no passive history, so the only line there is to
            draw is the untrained prior — a dashed guess across a week the app was not here for,
            ending in a hollow dot predicting a person it has never met. Nothing is plotted until
            there is a first day to plot. */
-        <EmptyState
-          message="Once you have shared a day or two, this is where you will see how the week has been going — and a gentle look at tomorrow."
-          style={styles.empty}
-        />
+        <FirstWeek onStartCheckIn={onStartCheckIn} />
       ) : (
       <>
         <View style={styles.ranges} accessibilityRole="tablist">
           {RANGES.map((r) => {
             const on = r.days === days;
+            // A week holds every day an early account has; longer ranges would be the same dots, smaller.
+            const off = early && r.days > 7;
             return (
               <Pressable
                 key={r.days}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: on }}
+                accessibilityState={{ selected: on, disabled: off }}
+                disabled={off}
                 onPress={() => {
                   setDays(r.days);
                   setSelected(null);
                   setHeld(null);
                 }}
-                style={[styles.range, on && styles.rangeOn]}
+                style={[styles.range, on && styles.rangeOn, off && styles.rangeOff]}
               >
                 <Text style={[styles.rangeText, on && styles.rangeTextOn]}>{r.label}</Text>
               </Pressable>
@@ -255,7 +352,7 @@ export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
                 ))}
                 {/* The forecast zone: a soft band from halfway between "Now" and "Next" to the right edge,
                     so the future reads as a different place from the days already lived. */}
-                {geom.xs.length > 1 && (
+                {!early && geom.xs.length > 1 && (
                   <Rect
                     x={(geom.xs[geom.xs.length - 2]! + geom.xs[geom.xs.length - 1]!) / 2}
                     y={0}
@@ -307,7 +404,7 @@ export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
                 )}
                 {/* Tomorrow is hollow and sits on the dashed line, with a halo and a heavier last segment
                     so it reads as the point of the chart rather than a stray end dot. */}
-                {geom.xs.length > 1 && (
+                {!early && geom.xs.length > 1 && (
                   <Path
                     d={linePath(
                       geom.xs.slice(-2),
@@ -320,28 +417,32 @@ export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
                     fill="none"
                   />
                 )}
-                <Circle
-                  cx={geom.xs[geom.xs.length - 1]!}
-                  cy={geom.y(shown.tomorrow)}
-                  r={DOT_R + 6}
-                  fill={RHYTHM}
-                  fillOpacity={0.18}
-                />
-                <Circle
-                  cx={geom.xs[geom.xs.length - 1]!}
-                  cy={geom.y(shown.tomorrow)}
-                  r={DOT_R + 1.5}
-                  fill={colors.surface}
-                  stroke={RHYTHM}
-                  strokeWidth={3}
-                />
+                {!early && (
+                  <>
+                    <Circle
+                      cx={geom.xs[geom.xs.length - 1]!}
+                      cy={geom.y(shown.tomorrow)}
+                      r={DOT_R + 6}
+                      fill={RHYTHM}
+                      fillOpacity={0.18}
+                    />
+                    <Circle
+                      cx={geom.xs[geom.xs.length - 1]!}
+                      cy={geom.y(shown.tomorrow)}
+                      r={DOT_R + 1.5}
+                      fill={colors.surface}
+                      stroke={RHYTHM}
+                      strokeWidth={3}
+                    />
+                  </>
+                )}
               </Svg>
             )}
-            {geom && geom.xs.length > 1 && (
+            {!early && geom && geom.xs.length > 1 && (
               // Sits over the forecast band itself, so the prediction reads as labelled rather
               // than as an unexplained tint a reader has to notice and interpret on their own.
               <View style={styles.forecastBadge} pointerEvents="none">
-                <Text style={styles.forecastBadgeText}>Forecast</Text>
+                <Text style={styles.forecastBadgeText}>{learning ? 'Early guess' : 'Forecast'}</Text>
               </View>
             )}
             {geom && (
@@ -417,7 +518,13 @@ export function WellbeingTrendCard({ series }: { series: TrendSeries | null }) {
           </View>
         </View>
 
-        <Text style={styles.forecastCaption}>What we expect for tomorrow</Text>
+        <Text style={styles.forecastCaption}>
+          {early
+            ? `${feltDays} of ${FORECAST_AFTER} days — after ${FORECAST_AFTER} check-ins I'll start guessing tomorrow`
+            : learning
+              ? 'An early guess for tomorrow — it gets better as you share more days'
+              : 'What we expect for tomorrow'}
+        </Text>
         {picked && (
           <Text style={styles.caption} numberOfLines={1}>
             {describe(picked, picked.date === todayKey)}
@@ -476,6 +583,9 @@ const styles = StyleSheet.create({
   },
   rangeOn: {
     backgroundColor: colors.primarySoft,
+  },
+  rangeOff: {
+    opacity: 0.4,
   },
   rangeText: {
     ...type.caption,
@@ -581,8 +691,61 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.ink2,
   },
-  empty: {
+  loading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
     marginTop: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  loadingText: {
+    ...type.caption,
+    color: colors.ink2,
+  },
+  first: {
+    marginTop: spacing.md,
+  },
+  firstRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line,
+  },
+  firstSlot: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  firstDot: {
+    width: DOT_R * 2 + 2,
+    height: DOT_R * 2 + 2,
+    borderRadius: DOT_R + 1,
+    backgroundColor: colors.line,
+  },
+  firstDotToday: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: FELT,
+  },
+  firstLabel: {
+    ...type.caption,
+    color: colors.ink3,
+  },
+  firstLabelToday: {
+    color: FELT,
+    fontWeight: '700',
+  },
+  firstMessage: {
+    ...type.caption,
+    color: colors.ink2,
+    marginTop: spacing.md,
+  },
+  firstAction: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.sm,
   },
   bubble: {
     alignSelf: 'flex-start',

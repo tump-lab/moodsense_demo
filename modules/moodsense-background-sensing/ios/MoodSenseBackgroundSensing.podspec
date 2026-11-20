@@ -8,9 +8,9 @@ Pod::Spec.new do |s|
   s.summary        = 'Reads CoreMotion activity history for MoodSense.'
   s.description    = 'Local Expo module. iOS records motion activity whether or not the app runs and keeps about seven days of it; this reads it back so gaps while the app was closed are recovered.'
   s.author         = 'MoodSense'
-  s.homepage       = 'https://github.com/tump-lab/moodesense_v1'
+  s.homepage       = 'https://anonymous.4open.science/r/moodsense-demo-7K3Q'
   s.platforms      = { :ios => '16.4' }
-  s.source         = { git: 'https://github.com/tump-lab/moodesense_v1' }
+  s.source         = { git: 'https://anonymous.4open.science/r/moodsense-demo-7K3Q' }
   s.license        = 'MIT'
   s.static_framework = true
 

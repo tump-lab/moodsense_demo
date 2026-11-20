@@ -409,6 +409,11 @@ export interface TrendSeries {
    * days they did not check in.
    */
   everFelt: boolean;
+  /**
+   * How many days this account has shared, across the whole history. The card holds back the
+   * tomorrow guess until there are a few, and labels it an early guess for the first week.
+   */
+  feltDays: number;
   /** When this series was built, so the card can show how current today's reading is. */
   builtAt: number;
 }
@@ -595,6 +600,7 @@ export function buildTrendSeries(
     // Read from the whole history, not from `points`, so narrowing the range cannot turn an
     // established account back into a new one. sliceSeries carries it through unchanged.
     everFelt: labels.some((l) => l.value != null),
+    feltDays: labels.filter((l) => l.value != null).length,
     builtAt: opts.now ?? Date.now(),
   };
 }
@@ -604,6 +610,9 @@ export function buildTrendSeries(
 // ---------------------------------------------------------------------------
 
 export function companionLine(series: TrendSeries, name: string): string {
+  if (!(series.everFelt ?? series.hasFelt)) {
+    return `Hi, I'm ${name}. I'll keep your days here.`;
+  }
   if (!series.hasFelt) {
     return `I will keep how you are doing right here. — ${name}`;
   }

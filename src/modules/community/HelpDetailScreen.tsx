@@ -23,6 +23,8 @@ import {
 import { addGroupToCalendar, calendarEventFor } from './groupSchedule';
 import CommunityCard from './CommunityCard';
 import { useJoinedGroups } from './joinedGroups';
+import { joinRoomInBackground } from './groupRoom';
+import { isLlmEnabled } from '../settings/llmSettings';
 import { MHA_LOGO, RESOURCE_LOGOS } from './resourceLogos';
 import { openHref, useHelpCatalog } from './useHelpCatalog';
 
@@ -324,7 +326,10 @@ export function PeerPage({ catalog, onOpenRoom }: { catalog: HelpCatalog; onOpen
     const event = calendarEventFor(group, organizer, new Date());
     try {
       if (!event) throw new Error('no upcoming meeting');
-      if (await addGroupToCalendar(event, Platform.OS === 'ios')) void toggle(group.id);
+      if (await addGroupToCalendar(event, Platform.OS === 'ios')) {
+        void toggle(group.id);
+        joinRoomInBackground(group.id, group, isLlmEnabled());
+      }
     } catch (err) {
       console.warn('Could not add group to calendar:', err);
       Alert.alert("Could not open your calendar", `${group.name} meets ${group.schedule}.`);

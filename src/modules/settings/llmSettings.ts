@@ -70,6 +70,9 @@ export const useLlmSettingsStore = create<LlmSettingsState>((set) => ({
     apply(value);
     set({ enabled: value });
     void logEvent('llm_enabled_changed', { enabled: value });
+    // Group rooms record each member's setting, so Guide stops reading this person's messages at once.
+    // Imported lazily: the community module imports this store.
+    void import('../community/syncRoomAi').then((m) => m.syncJoinedRoomsAiFlag(value)).catch(() => {});
     try {
       await ensureTable();
       await exec(

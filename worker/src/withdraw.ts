@@ -49,6 +49,11 @@ export async function withdrawAndDeleteRemoteData(env: Env, uid: string): Promis
     ...events.filter((d) => underCollection(d.name, 'sensing') || underCollection(d.name, 'logs')),
     ...[...messages, ...members].filter((d) => underCollection(d.name, 'group_rooms')),
   ].map((d) => d.name));
+  // Each removed membership leaves its room's memberCount (shown on group cards) one lower.
+  const rooms = members
+    .filter((d) => underCollection(d.name, 'group_rooms'))
+    .map((d) => d.name.slice(0, d.name.lastIndexOf('/members/')));
+  await fs.incrementFields(rooms, 'memberCount', -1);
 
   await deleteVoiceNotes(env, uid);
 }

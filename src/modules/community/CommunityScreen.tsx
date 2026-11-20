@@ -5,7 +5,7 @@
  * - Official Communities: trusted support organizations for where this person is (by IP, then
  *   chosen community, then locale), including group chat where an organizer's groups are listed.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -24,6 +24,8 @@ import { AppButton, Screen, SectionTitle } from '../../components';
 import { colors, radius, spacing, type } from '../../theme';
 import type { RootStackParamList } from '../../navigation';
 import { logEvent } from '../../services/logging';
+import { joinRoomInBackground, subscribeMemberCounts } from './groupRoom';
+import { isLlmEnabled } from '../settings/llmSettings';
 import CommunityCard from './CommunityCard';
 import { PeerPage } from './HelpDetailScreen';
 import { useHelpCatalog } from './useHelpCatalog';
@@ -32,7 +34,6 @@ import {
   COMMUNITY_NAME_MAX,
   SEED_PEER_COMMUNITIES,
   formatMembers,
-  memberCount,
   usePeerCommunities,
   type PeerCommunity,
 } from './peerCommunities';
@@ -40,21 +41,25 @@ import {
 function PeerCommunityCard({
   community,
   joined,
+  members,
   onJoin,
   onOpenRoom,
 }: {
   community: PeerCommunity;
   joined: boolean;
+  /** Live count from the community's chat room; undefined until it loads. */
+  members: number | undefined;
   onJoin: () => void;
   onOpenRoom: () => void;
 }) {
-  const meta = formatMembers(memberCount(community, joined)) + (community.mine ? ' · Created by you' : '');
+  const count = members === undefined ? null : formatMembers(members);
+  const meta = [count, community.mine ? 'Created by you' : null].filter(Boolean).join(' · ');
   return (
     <CommunityCard
       emoji={community.emoji ?? '\u{1F4AC}'}
       name={community.name}
       about={community.description}
-      meta={[meta]}
+      meta={meta ? [meta] : []}
       actions={
         joined
           ? [
@@ -142,10 +147,14 @@ export default function CommunityScreen() {
     void load();
   }, [load]);
 
+  const allIds = useMemo(() => [...created, ...SEED_PEER_COMMUNITIES].map((c) => c.id), [created]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => subscribeMemberCounts(allIds, setCounts), [allIds]);
+
   // Your own first, then the largest; Create stays in the section header, not a row of its own.
   const communities = [
     ...created,
-    ...[...SEED_PEER_COMMUNITIES].sort((a, b) => b.baseMembers - a.baseMembers),
+    ...[...SEED_PEER_COMMUNITIES].sort((a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0)),
   ].slice(0, MAX_PEER_SHOWN);
 
   return (
@@ -170,8 +179,10 @@ export default function CommunityScreen() {
             key={c.id}
             community={c}
             joined={joined.includes(c.id)}
+            members={counts[c.id]}
             onJoin={() => {
               void join(c.id);
+              joinRoomInBackground(c.id, { name: c.name, about: c.description || `A peer community for ${c.name}.` }, isLlmEnabled());
               void logEvent('peer_community_joined', { id: c.id }).catch(() => {});
             }}
             onOpenRoom={() => navigation.navigate('GroupRoom', { groupId: c.id })}

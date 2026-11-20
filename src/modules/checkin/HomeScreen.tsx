@@ -121,8 +121,15 @@ export default function HomeScreen() {
   const [phq4Done, setPhq4Done] = useState(false);
   const [supportVisible, setSupportVisible] = useState(false);
   const [trend, setTrend] = useState<TrendSeries | null>(null);
+  /**
+   * False until this screen has pulled the account's check-ins from the cloud once and rebuilt the
+   * trend from them. Until then an empty trend may only mean "not downloaded yet", so the card
+   * says it is loading instead of greeting a returning account as brand new.
+   */
+  const [cloudChecked, setCloudChecked] = useState(false);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef(0);
+  const scrollRef = useRef<ScrollView>(null);
   // The mood the reason sheet is asking about, and the save it should attach its answer to.
   const [reasonMood, setReasonMood] = useState<Mood | null>(null);
   const pendingCheckin = useRef<Promise<number> | null>(null);
@@ -141,7 +148,9 @@ export default function HomeScreen() {
 
   const refresh = useCallback(() => {
     let active = true;
-    void load();
+    // load() first pulls the account's check-ins down from Firestore; the trend rebuild below waits
+    // on it too, or a fresh install signed into an old account would build (and cache) an empty card.
+    const checkinsLoaded = load().catch(() => {});
     void loadCadence();
     void loadSupportPrompt();
     void syncPhq4FromCloud()
@@ -166,6 +175,12 @@ export default function HomeScreen() {
       // again only if that brought anything new, so a reinstalled phone fills in the days it
       // measured without the card waiting on the network.
       void rebuild();
+      // The fingerprint makes this a no-op when the cloud had nothing this phone lacked.
+      void checkinsLoaded
+        .then(() => (active ? rebuild() : undefined))
+        .finally(() => {
+          if (active) setCloudChecked(true);
+        });
       backfillSensingFromCloud()
         .catch(() => null)
         .then((res) => {
@@ -272,6 +287,7 @@ export default function HomeScreen() {
   return (
     <Screen>
       <ScrollView
+        ref={scrollRef}
         scrollEnabled={!turningPlanet}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={100}
@@ -390,7 +406,12 @@ export default function HomeScreen() {
           <CommunityFeed onPlanetDrag={setTurningPlanet} planetVisible={planetVisible} />
         </View>
 
-        <WellbeingTrendCard series={trend} />
+        <WellbeingTrendCard
+          series={trend}
+          syncing={!cloudChecked}
+          // Today's mood picker sits at the top of this screen, so a new account's button scrolls there.
+          onStartCheckIn={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
+        />
       </ScrollView>
 
       <MoodReasonModal mood={reasonMood} onClose={closeReasons} onSubmit={submitReasons} />

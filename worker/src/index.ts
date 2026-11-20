@@ -1,5 +1,6 @@
 import { aggregateCommunityMoods } from './aggregate';
 import { chat } from './ai';
+import { groupGuide } from './groupGuide';
 import { verifyFirebaseToken } from './auth';
 import { ApiError, type Env } from './types';
 import { withdrawAndDeleteRemoteData } from './withdraw';
@@ -23,6 +24,10 @@ export default {
       if (pathname === '/ai') {
         await verifyFirebaseToken(request, env);
         return json(await chat(await request.json().catch(() => null), env));
+      }
+      if (pathname === '/group-guide') {
+        const uid = await verifyFirebaseToken(request, env);
+        return json(await groupGuide(await request.json().catch(() => null), env, uid));
       }
       if (pathname === '/delete') {
         const uid = await verifyFirebaseToken(request, env);

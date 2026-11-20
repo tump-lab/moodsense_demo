@@ -21,7 +21,7 @@ import {
   signOut as firebaseSignOut,
   User,
 } from '@firebase/auth';
-import { connectFirestoreEmulator, Firestore, getFirestore } from 'firebase/firestore';
+import { connectFirestoreEmulator, Firestore, getFirestore, initializeFirestore } from 'firebase/firestore';
 import { FirebaseStorage, getStorage } from 'firebase/storage';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -52,7 +52,17 @@ export function getDb(): Firestore | null {
   if (!db) {
     const a = getApp();
     if (!a) return null;
-    db = getFirestore(a);
+    // On iOS/Android, React Native buffers Firestore's streaming connection, so onSnapshot gets its
+    // first read but never hears about later server writes (Guide's replies, other members' group
+    // messages). Long polling delivers them. initializeFirestore throws if called twice, hence the fallback.
+    try {
+      db =
+        Platform.OS === 'web'
+          ? getFirestore(a)
+          : initializeFirestore(a, { experimentalForceLongPolling: true });
+    } catch {
+      db = getFirestore(a);
+    }
     // Dev only: e.g. EXPO_PUBLIC_FIRESTORE_EMULATOR=127.0.0.1:8089 to try rules or screens before deploying them.
     const emulator = process.env.EXPO_PUBLIC_FIRESTORE_EMULATOR;
     if (__DEV__ && emulator) {

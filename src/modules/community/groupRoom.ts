@@ -1,13 +1,33 @@
 /**
- * Each peer group's chat room, kept on this phone for now: your messages and the AI guide's. With
- * developer mode on, a labelled sample conversation is shown in place of the other members; it is
- * added at display time and never stored, so turning developer mode off removes it. Nothing here leaves the device
- * except the guide's request to the chat model (services/llm.ts).
+ * Each peer group's chat room, shared by everyone who joined the group in MoodSense.
+ * Lives in Firestore under group_rooms/{groupId}, with `members/{uid}` and `messages/{id}`
+ * (see firestore.rules). Members appear under a pseudonym made from their account id, never their name.
+ *
+ * Guide, the AI member, answers when someone writes @Guide. Its replies are written server-side by the
+ * Worker's /group-guide route (worker/src/groupGuide.ts); clients cannot post as Guide. Each member doc
+ * carries `ai`, mirroring that member's "Use AI" setting: Guide only answers members with it on, and
+ * only messages from members with it on are sent to the model as context.
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  increment,
+  limitToLast,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
+  type Timestamp,
+} from 'firebase/firestore';
 import { chatComplete } from '../../services/llm';
 import { isAiLive } from '../../services/aiGateway';
-import { getActiveUid } from '../../services/firebase';
+import { apiPost } from '../../services/api';
+import { ensureSignedIn, getActiveUid, getDb } from '../../services/firebase';
 import { buildRiskScreenMessages, GUIDE_NAME, parseRiskLevel, type RiskLevel } from './guideRules';
 
 /** What the guide needs to know about the room it is in — an official PeerGroup or a user-created PeerCommunity, either one. */
@@ -40,8 +60,10 @@ export async function screenMessageRisk(text: string): Promise<RiskLevel | null>
 
 export const MAX_MESSAGE_LENGTH = 1000;
 
-/** How many earlier messages the guide sees when it answers. */
-const GUIDE_CONTEXT_MESSAGES = 20;
+/** How many recent messages the room shows. */
+const SHOWN_MESSAGES = 200;
+
+const GUIDE_TIMEOUT_MS = 35_000;
 
 export interface RoomMessage {
   id: string;
@@ -50,6 +72,13 @@ export interface RoomMessage {
   text: string;
   kind: 'member' | 'guide' | 'sample';
   ts: number;
+}
+
+export interface RoomMember {
+  uid: string;
+  name: string;
+  /** This member's "Use AI" setting. */
+  ai: boolean;
 }
 
 const ADJECTIVES = ['Quiet', 'Gentle', 'Bright', 'Steady', 'Kind', 'Calm', 'Brave', 'Warm', 'Hopeful', 'Patient', 'Curious', 'Sunny'];
@@ -69,28 +98,7 @@ export function myUid(): string {
   return getActiveUid();
 }
 
-/** Sample members (developer mode only), so the room shows what it will feel like. The screen labels them as samples. */
-export const SAMPLE_MEMBERS = ['Kind Otter', 'Steady Cedar', 'Hopeful Fern'];
-
-function sampleConversation(now: number): RoomMessage[] {
-  const lines: [string, RoomMessage['kind'], string][] = [
-    ['Kind Otter', 'sample', 'Rough week. Anyone else find Sunday nights the hardest?'],
-    ['Steady Cedar', 'sample', 'Yes, every week. I started making a small plan for Monday morning so it feels less open-ended.'],
-    ['Hopeful Fern', 'sample', '@Guide do you have any ideas for Sunday-night anxiety?'],
-    [GUIDE_NAME, 'guide', "That is a really common one, Hopeful Fern. Steady Cedar's Monday plan is a great example; a short wind-down routine can help too. What has helped others here?"],
-    ['Kind Otter', 'sample', 'Going for a walk before dinner helps me a bit. See everyone at the meeting!'],
-  ];
-  return lines.map(([name, kind, text], i) => ({
-    id: `sample-${i}`,
-    uid: kind === 'guide' ? 'guide' : `sample-${name}`,
-    name,
-    text,
-    kind,
-    ts: now - (lines.length - i) * 6 * 60_000,
-  }));
-}
-
-/** Screenshot mode only: a fuller conversation, shown as ordinary members, for paper figures and demos. */
+/** Screenshot mode only: a fuller conversation, shown as ordinary members, for paper figures and demos. Never stored. */
 const ME = '\u0000me';
 
 function screenshotConversation(now: number): RoomMessage[] {
@@ -118,116 +126,193 @@ function screenshotConversation(now: number): RoomMessage[] {
   }));
 }
 
-const key = (groupId: string) => `group_room:${getActiveUid()}:${groupId}`;
-
-const isSample = (m: RoomMessage) => m.id.startsWith('sample-');
-
-/** The room's real messages. Rooms saved before samples became developer-only had them stored; they are dropped here. */
-export async function loadRoom(groupId: string): Promise<RoomMessage[]> {
-  try {
-    const raw = await AsyncStorage.getItem(key(groupId));
-    if (raw) return (JSON.parse(raw) as RoomMessage[]).filter((m) => !isSample(m));
-  } catch {
-    // A corrupt room starts over rather than blocking the screen.
-  }
-  return [];
-}
-
-/** What the screen shows: the samples (developer mode only) ahead of the real messages. */
-export function withSamples(messages: RoomMessage[], showSamples: boolean, screenshot = false): RoomMessage[] {
-  if (!showSamples) return messages;
+/** What the screen shows: in screenshot mode, the demo conversation ahead of the real messages. */
+export function withScreenshotSamples(messages: RoomMessage[], screenshot: boolean): RoomMessage[] {
+  if (!screenshot) return messages;
   const firstTs = Math.min(messages[0]?.ts ?? Date.now(), Date.now());
-  return [...(screenshot ? screenshotConversation(firstTs) : sampleConversation(firstTs)), ...messages];
-}
-
-export async function saveRoom(groupId: string, messages: RoomMessage[]): Promise<void> {
-  const real = messages.filter((m) => !isSample(m)).slice(-200);
-  await AsyncStorage.setItem(key(groupId), JSON.stringify(real)).catch(() => {});
+  return [...screenshotConversation(firstTs), ...messages];
 }
 
 /** Guide's greeting in an empty room, so it is clear who is here. Shown, never stored. */
-export function guideWelcome(name: string): RoomMessage {
+export function guideWelcome(name: string, aiOn: boolean): RoomMessage {
   return {
     id: 'welcome',
     uid: 'guide',
     name: GUIDE_NAME,
-    text:
-      `Hi ${name}, welcome. I am ${GUIDE_NAME}, an artificial intelligence that helps this group's members support each ` +
-      `other between meetings. Say hello, or write @${GUIDE_NAME} if you would like me to answer.`,
+    text: aiOn
+      ? `Hi ${name}, welcome. I am ${GUIDE_NAME}, an artificial intelligence that helps this group's members support each ` +
+        `other between meetings. Say hello, or write @${GUIDE_NAME} if you would like me to answer.`
+      : `Hi ${name}, welcome. Say hello to the group. I am ${GUIDE_NAME}, an artificial intelligence; I can answer you ` +
+        `once "Use AI" is on in Settings.`,
     kind: 'guide',
     ts: Date.now(),
   };
 }
 
-export async function clearRoom(groupId: string): Promise<void> {
-  await AsyncStorage.removeItem(key(groupId)).catch(() => {});
+export function isRoomAvailable(): boolean {
+  return getDb() != null;
 }
 
-export function newMessage(text: string): RoomMessage {
-  const uid = getActiveUid();
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    uid,
-    name: pseudonymFor(uid),
-    text: text.trim().slice(0, MAX_MESSAGE_LENGTH),
-    kind: 'member',
-    ts: Date.now(),
+function roomRef(groupId: string) {
+  const db = getDb();
+  if (!db) throw new Error('Firestore is not configured');
+  return doc(db, 'group_rooms', groupId);
+}
+
+/**
+ * Adds this account to the room (creating the room on first join) and records its "Use AI" setting.
+ * Safe to call again: it refreshes the member doc. Returns the uid it joined as.
+ */
+export async function joinRoom(groupId: string, subject: RoomSubject, ai: boolean): Promise<string> {
+  const user = await ensureSignedIn();
+  if (!user) throw new Error('Not signed in');
+  const db = getDb()!;
+  const room = roomRef(groupId);
+  const member = doc(room, 'members', user.uid);
+  const data = { uid: user.uid, name: pseudonymFor(user.uid), ai, joinedAt: serverTimestamp() };
+
+  // Rules only let a member read the member list, so a refused read means "not a member yet".
+  const already = await getDoc(member).then((s) => s.exists(), () => false);
+  if (already) {
+    await setDoc(member, data);
+    return user.uid;
+  }
+
+  // A new member and the room's memberCount move together in one batch (firestore.rules checks both).
+  const attempt = async () => {
+    const roomSnap = await getDoc(room);
+    const batch = writeBatch(db);
+    if (roomSnap.exists()) batch.update(room, { memberCount: increment(1) });
+    else batch.set(room, { name: subject.name.slice(0, 120), about: subject.about.slice(0, 300), memberCount: 1 });
+    batch.set(member, data);
+    await batch.commit();
+  };
+  try {
+    await attempt();
+  } catch (err) {
+    // Someone else may have created the room a moment earlier; try once more as a join.
+    console.warn('Retrying group room join:', err);
+    await attempt();
+  }
+  return user.uid;
+}
+
+/** Joins without waiting, for join buttons outside the room. */
+export function joinRoomInBackground(groupId: string, subject: RoomSubject, ai: boolean): void {
+  if (!isRoomAvailable()) return;
+  joinRoom(groupId, subject, ai).catch((err) => console.warn('Could not join group room:', err));
+}
+
+/** Removes this account from the room. Its earlier messages stay, as in any group chat. */
+export async function leaveRoom(groupId: string): Promise<void> {
+  if (!isRoomAvailable()) return;
+  const user = await ensureSignedIn();
+  if (!user) return;
+  const room = roomRef(groupId);
+  const member = doc(room, 'members', user.uid);
+  const isMember = await getDoc(member).then((s) => s.exists(), () => false);
+  if (!isMember) return;
+  const batch = writeBatch(getDb()!);
+  batch.delete(member);
+  batch.update(room, { memberCount: increment(-1) });
+  await batch.commit();
+}
+
+/** Live member counts for these rooms, keyed by group id. A room nobody has joined yet counts 0. */
+export function subscribeMemberCounts(groupIds: string[], onChange: (counts: Record<string, number>) => void): () => void {
+  if (!isRoomAvailable() || groupIds.length === 0) return () => {};
+  const counts: Record<string, number> = {};
+  let unsubs: (() => void)[] = [];
+  let cancelled = false;
+  void ensureSignedIn().then((user) => {
+    if (cancelled || !user) return;
+    unsubs = groupIds.map((id) =>
+      onSnapshot(
+        roomRef(id),
+        (snap) => {
+          const n = snap.exists() ? Number(snap.data().memberCount ?? 0) : 0;
+          counts[id] = Math.max(0, Number.isFinite(n) ? n : 0);
+          onChange({ ...counts });
+        },
+        (err) => console.warn('Member count listener failed:', err)
+      )
+    );
+  });
+  return () => {
+    cancelled = true;
+    unsubs.forEach((u) => u());
   };
 }
 
-export function crisisReply(name: string): string {
-  return (
-    `${name}, thank you for telling us. I am an artificial intelligence and cannot help in an emergency, but people can, right now: ` +
-    'call or text 988 (Suicide & Crisis Lifeline), or call 911 if you are in immediate danger. ' +
-    'Outside the United States, findahelpline.com lists a line near you. You are not alone in this room.'
+/** Updates the `ai` flag in each of these rooms this account belongs to (rooms it is not in are skipped). */
+export async function syncRoomAiFlag(groupIds: string[], ai: boolean): Promise<void> {
+  if (!isRoomAvailable() || groupIds.length === 0) return;
+  const user = await ensureSignedIn();
+  if (!user) return;
+  await Promise.all(
+    groupIds.map((id) =>
+      updateDoc(doc(roomRef(id), 'members', user.uid), { uid: user.uid, name: pseudonymFor(user.uid), ai, joinedAt: serverTimestamp() }).catch(
+        () => undefined
+      )
+    )
   );
 }
 
-function guideSystemPrompt(group: RoomSubject): string {
-  return `You are ${GUIDE_NAME}, an AI facilitator in the chat room of the "${group.name}" peer support group (${group.about}) in the MoodSense app.
-The room is for the members to support each other between meetings. Your job is to help that happen, not to replace it.
-- Reply in English, in 1-3 short sentences. Plain text only: no markdown, no lists.
-- Answer the member who addressed you by name. Be warm and non-judgmental.
-- Where it fits, turn the conversation back to the group (invite others to share what has helped them).
-- You are NOT a clinician: never diagnose, never give medical or medication advice.
-- If anyone mentions self-harm, suicide, or being unsafe, point them to 988 (call or text) or 911 in an emergency.
-- Members appear under pseudonyms; use them.`;
+function tsOf(v: unknown): number {
+  return (v as Timestamp | null)?.toMillis?.() ?? Date.now();
 }
 
-/** Used when no model is reachable: the companion's canned replies speak to one person, these to a group. */
-const OFFLINE_GUIDE_REPLIES = [
-  (name: string) => `Thanks for asking, ${name}. That is something a lot of people here have wrestled with. What has helped others in the group?`,
-  (name: string) => `Good question, ${name}. Small steps often help more than big plans. Has anyone here found one that works for them?`,
-  (name: string) => `${name}, you are not the only one with that question. It could be a good one to bring to the next meeting too. Anyone want to share what is worked?`,
-];
-
-function offlineGuideReply(name: string): string {
-  return OFFLINE_GUIDE_REPLIES[Math.floor(Math.random() * OFFLINE_GUIDE_REPLIES.length)]!(name);
+export function subscribeMessages(groupId: string, onChange: (m: RoomMessage[]) => void, onError: (e: Error) => void): () => void {
+  const q = query(collection(roomRef(groupId), 'messages'), orderBy('ts'), limitToLast(SHOWN_MESSAGES));
+  return onSnapshot(
+    q,
+    (snap) =>
+      onChange(
+        snap.docs.map((d) => {
+          const data = d.data({ serverTimestamps: 'estimate' });
+          return {
+            id: d.id,
+            uid: String(data.uid ?? ''),
+            name: String(data.name ?? ''),
+            text: String(data.text ?? ''),
+            kind: data.kind === 'guide' ? 'guide' : 'member',
+            ts: tsOf(data.ts),
+          };
+        })
+      ),
+    onError
+  );
 }
 
-export async function guideReply(group: RoomSubject, history: RoomMessage[], latest: RoomMessage): Promise<RoomMessage> {
-  if (!isAiLive('chat')) {
-    await new Promise((r) => setTimeout(r, 600));
-    return { id: `guide-${Date.now()}`, uid: 'guide', name: GUIDE_NAME, text: offlineGuideReply(latest.name), kind: 'guide', ts: Date.now() };
-  }
-  const recent = history.slice(-GUIDE_CONTEXT_MESSAGES);
-  const transcript = recent.map((m) => `${m.name}: ${m.text}`).join('\n');
-  let text: string;
-  try {
-    text = await chatComplete([
-      { role: 'system', content: guideSystemPrompt(group) },
-      {
-        role: 'user',
-        content: `Recent messages in the room, oldest first:\n${transcript}\n\nReply as ${GUIDE_NAME} to ${latest.name}'s latest message.`,
-      },
-    ]);
-  } catch (err) {
-    console.warn('Guide could not answer:', err);
-    text = offlineGuideReply(latest.name);
-  }
-  return { id: `guide-${Date.now()}`, uid: 'guide', name: GUIDE_NAME, text, kind: 'guide', ts: Date.now() };
+export function subscribeMembers(groupId: string, onChange: (m: RoomMember[]) => void, onError: (e: Error) => void): () => void {
+  return onSnapshot(
+    collection(roomRef(groupId), 'members'),
+    (snap) =>
+      onChange(
+        snap.docs.map((d) => {
+          const data = d.data();
+          return { uid: d.id, name: String(data.name ?? pseudonymFor(d.id)), ai: data.ai === true };
+        })
+      ),
+    onError
+  );
 }
 
-export function guideCrisisMessage(latest: RoomMessage): RoomMessage {
-  return { id: `guide-${Date.now()}`, uid: 'guide', name: GUIDE_NAME, text: crisisReply(latest.name), kind: 'guide', ts: Date.now() };
+/** Posts a message as this account. Returns its id. */
+export async function sendRoomMessage(groupId: string, text: string): Promise<string> {
+  const user = await ensureSignedIn();
+  if (!user) throw new Error('Not signed in');
+  const ref = await addDoc(collection(roomRef(groupId), 'messages'), {
+    uid: user.uid,
+    name: pseudonymFor(user.uid),
+    text: text.trim().slice(0, MAX_MESSAGE_LENGTH),
+    kind: 'member',
+    ts: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+/** Asks the Worker to have Guide answer this account's message. Guide's reply arrives through subscribeMessages. */
+export async function requestGuideReply(groupId: string, messageId: string): Promise<void> {
+  await apiPost('/group-guide', { groupId, messageId }, GUIDE_TIMEOUT_MS);
 }

@@ -1,7 +1,7 @@
 /**
  * Peer communities on the Community tab: user-oriented groups to join, plus ones this account
- * creates. First version is local only: joining and creating are kept on this phone, member counts
- * are seeded. Each joined community opens the same chat room as an official group (see
+ * creates. Which communities this account joined or created is kept on this phone; member counts are
+ * live, from each community's shared chat room (groupRoom.ts). Each joined community opens the same chat room as an official group (see
  * GroupRoomScreen/groupRoom.ts) — there are no posts outside that room yet.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,8 +13,6 @@ export interface PeerCommunity {
   name: string;
   emoji?: string;
   description?: string;
-  /** Members other than this account. */
-  baseMembers: number;
   /** True for a community this account created. */
   mine?: boolean;
 }
@@ -25,35 +23,30 @@ export const SEED_PEER_COMMUNITIES: readonly PeerCommunity[] = [
     emoji: '\u{1F319}',
     name: 'Late-Night Insomnia Support',
     description: 'For the nights sleep will not come. Company and gentle wind-down ideas.',
-    baseMembers: 1284,
   },
   {
     id: 'workplace-stress',
     emoji: '\u{1F4BC}',
     name: 'Workplace Stress Zone',
     description: 'Deadlines, bosses and burnout, talked through with people who get it.',
-    baseMembers: 2107,
   },
   {
     id: 'study-pressure',
     emoji: '\u{1F4DA}',
     name: 'Study Pressure Support',
     description: 'Exams, grades and expectations. Study breaks welcome.',
-    baseMembers: 1653,
   },
   {
     id: 'social-anxiety',
     emoji: '\u{1FAC2}',
     name: 'Social Anxiety Support',
     description: 'A low-pressure space to share small wins and hard moments.',
-    baseMembers: 942,
   },
   {
     id: 'emotional-wellbeing',
     emoji: '\u{1F331}',
     name: 'Emotional Wellbeing Group',
     description: 'Everyday ups and downs, and what helps.',
-    baseMembers: 3015,
   },
 ];
 
@@ -70,10 +63,6 @@ async function readJson<T>(k: string, fallback: T): Promise<T> {
   } catch {
     return fallback;
   }
-}
-
-export function memberCount(c: PeerCommunity, joined: boolean): number {
-  return c.baseMembers + (joined ? 1 : 0);
 }
 
 export function formatMembers(n: number): string {
@@ -119,7 +108,6 @@ export const usePeerCommunities = create<PeerCommunitiesState>((set, get) => ({
       id: `mine-${Date.now()}`,
       name: n,
       description: d || undefined,
-      baseMembers: 0,
       mine: true,
     };
     const created = [community, ...get().created];

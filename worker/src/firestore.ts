@@ -5,6 +5,8 @@ export type FsValue = {
   stringValue?: string;
   integerValue?: string;
   doubleValue?: number;
+  booleanValue?: boolean;
+  timestampValue?: string;
 };
 
 export interface FsDoc {
@@ -58,6 +60,38 @@ export class Firestore {
       for (const r of rows) if (r.found) out.set(r.found.name, r.found);
     }
     return names.map((n) => out.get(n) ?? null);
+  }
+
+  /** Docs in one collection under `parentPath` (e.g. `group_rooms/abc`), optionally newest-first by a field, capped at `limit`. */
+  async listUnder(parentPath: string, collectionId: string, opts: { orderByDesc?: string; limit?: number } = {}): Promise<FsDoc[]> {
+    const rows = await this.call<{ document?: FsDoc }[]>(`${this.base}/${parentPath}:runQuery`, {
+      body: {
+        structuredQuery: {
+          from: [{ collectionId }],
+          ...(opts.orderByDesc ? { orderBy: [{ field: { fieldPath: opts.orderByDesc }, direction: 'DESCENDING' }] } : {}),
+          ...(opts.limit ? { limit: opts.limit } : {}),
+        },
+      },
+    });
+    return rows.flatMap((r) => (r.document ? [r.document] : []));
+  }
+
+  /** Adds `by` to a numeric field on each doc (full names). */
+  async incrementFields(names: string[], field: string, by: number): Promise<void> {
+    for (let i = 0; i < names.length; i += 400) {
+      await this.call(`${this.base}:commit`, {
+        body: {
+          writes: names.slice(i, i + 400).map((document) => ({
+            transform: { document, fieldTransforms: [{ fieldPath: field, increment: { integerValue: String(by) } }] },
+          })),
+        },
+      });
+    }
+  }
+
+  /** Creates one doc; fails if it already exists, so two concurrent writers cannot both create it. */
+  async create(doc: FsDoc): Promise<void> {
+    await this.call(`${this.base}:commit`, { body: { writes: [{ update: doc, currentDocument: { exists: false } }] } });
   }
 
   /** Writes whole docs (replacing them). */

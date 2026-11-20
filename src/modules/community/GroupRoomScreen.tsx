@@ -1,8 +1,9 @@
 /**
- * A peer group's chat room: your messages and the AI guide's, plus a labelled sample conversation in
- * place of the other members when developer mode is on. See groupRoom.ts for why it is on this phone only and when the guide speaks.
+ * A peer group's chat room, shared by everyone who joined the group, plus Guide, the AI member.
+ * See groupRoom.ts for where messages live and worker/src/groupGuide.ts for when Guide speaks.
+ * With "Use AI" off, Guide does not answer this person and their messages are not sent to the model.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -25,29 +26,31 @@ import { useHelpCatalog } from './useHelpCatalog';
 import { useJoinedGroups } from './joinedGroups';
 import { SEED_PEER_COMMUNITIES, usePeerCommunities } from './peerCommunities';
 import {
-  clearRoom,
   combineRisk,
   GUIDE_NAME,
-  guideReply,
   guideWelcome,
-  loadRoom,
+  isRoomAvailable,
+  joinRoom,
+  leaveRoom,
   matchesCrisisRules,
   MAX_MESSAGE_LENGTH,
   mentionsGuide,
   myUid,
-  newMessage,
   pseudonymFor,
-  SAMPLE_MEMBERS,
-  saveRoom,
+  requestGuideReply,
   screenMessageRisk,
+  sendRoomMessage,
+  subscribeMembers,
+  subscribeMessages,
   type RiskLevel,
+  type RoomMember,
   type RoomMessage,
   type RoomSubject,
-  withSamples,
+  withScreenshotSamples,
 } from './groupRoom';
 import { useDevModeStore } from '../settings/devMode';
+import { useLlmSettingsStore } from '../settings/llmSettings';
 import GroupSafetySheet from './GroupSafetySheet';
-import { useCrisisResource } from '../phq4/useCrisisResource';
 import { logEvent } from '../../services/logging';
 
 function timeOf(ts: number): string {
@@ -80,7 +83,7 @@ function Bubble({ message, mine }: { message: RoomMessage; mine: boolean }) {
         <View style={styles.nameRow}>
           {guide && <Ionicons name="sparkles" size={12} color={colors.indigo} />}
           <Text style={[styles.name, guide && { color: colors.indigo }]}>
-            {guide ? `${GUIDE_NAME} · Artificial Intelligence` : message.kind === 'sample' ? `${message.name} · sample` : message.name}
+            {guide ? `${GUIDE_NAME} · Artificial Intelligence` : message.name}
           </Text>
         </View>
       )}
@@ -107,16 +110,20 @@ export default function GroupRoomScreen({ route, navigation }: NativeStackScreen
     : undefined);
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
-  const uid = myUid();
-  const devMode = useDevModeStore((s) => s.enabled);
-  const crisis = useCrisisResource();
+  const [uid, setUid] = useState<string>(myUid());
   const screenshot = useDevModeStore((s) => s.screenshot);
+  const aiOn = useLlmSettingsStore((s) => s.enabled);
 
   const [messages, setMessages] = useState<RoomMessage[] | null>(null);
+  const [members, setMembers] = useState<RoomMember[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  const [guideTyping, setGuideTyping] = useState(false);
+  const [sending, setSending] = useState(false);
+  /** The id of this person's message Guide is answering, until Guide's reply arrives. */
+  const [guidePending, setGuidePending] = useState<string | null>(null);
   const [safetyLevel, setSafetyLevel] = useState<RiskLevel>(0);
   const list = useRef<FlatList<RoomMessage>>(null);
+  const others = useMemo(() => members.filter((m) => m.uid !== uid), [members, uid]);
 
   useEffect(() => {
     if (group) navigation.setOptions({ title: group.name });
@@ -127,31 +134,58 @@ export default function GroupRoomScreen({ route, navigation }: NativeStackScreen
   }, []);
 
   useEffect(() => {
-    let live = true;
-    void loadRoom(groupId).then((m) => {
-      if (live) setMessages(m);
-    });
-    return () => {
-      live = false;
-    };
-  }, [groupId]);
+    void useLlmSettingsStore.getState().load();
+  }, []);
 
-  const append = (current: RoomMessage[], message: RoomMessage) => {
-    const next = [...current, message];
-    setMessages(next);
-    void saveRoom(groupId, next);
-    // onContentSizeChange alone misses a reply that lands while the list is still laying out.
-    setTimeout(() => list.current?.scrollToEnd({ animated: true }), 100);
-    return next;
-  };
+  // Joining again on every visit is harmless: it covers groups joined before rooms were shared and
+  // keeps this member's `ai` flag in step with Settings.
+  const subjectName = group?.name;
+  const subjectAbout = group?.about;
+  useEffect(() => {
+    if (!subjectName || !isRoomAvailable()) return;
+    let unsubs: (() => void)[] = [];
+    let cancelled = false;
+    joinRoom(groupId, { name: subjectName, about: subjectAbout ?? '' }, aiOn)
+      .then((me) => {
+        if (cancelled) return;
+        setUid(me);
+        const fail = (err: Error) => {
+          console.warn('Group room listener failed:', err);
+          setError("Couldn't load this room. Check your connection and try again.");
+        };
+        unsubs = [subscribeMessages(groupId, setMessages, fail), subscribeMembers(groupId, setMembers, fail)];
+      })
+      .catch((err) => {
+        console.warn('Could not join group room:', err);
+        setError("Couldn't join this room. Check your connection and try again.");
+        setMessages([]);
+      });
+    return () => {
+      cancelled = true;
+      unsubs.forEach((u) => u());
+    };
+  }, [groupId, subjectName, subjectAbout, aiOn]);
+
+  // Guide's reply has arrived once a guide message is newer than the message it is answering.
+  useEffect(() => {
+    if (!guidePending || !messages) return;
+    const idx = messages.findIndex((m) => m.id === guidePending);
+    if (idx >= 0 && messages.slice(idx + 1).some((m) => m.kind === 'guide')) setGuidePending(null);
+  }, [messages, guidePending]);
+
+  useEffect(() => {
+    // onContentSizeChange alone misses a message that lands while the list is still laying out.
+    const t = setTimeout(() => list.current?.scrollToEnd({ animated: true }), 100);
+    return () => clearTimeout(t);
+  }, [messages?.length]);
 
   const send = async () => {
-    if (!group || !messages || !draft.trim()) return;
-    const mine = newMessage(draft);
+    if (!group || !messages || !draft.trim() || sending) return;
+    const text = draft.trim().slice(0, MAX_MESSAGE_LENGTH);
 
     // Safety screen on every message (guideRules.ts). Keyword rules act at once; the LLM screen can
     // raise the level when it answers. Only the sender sees the sheet.
-    const ruleHit = matchesCrisisRules(mine.text);
+    const ruleHit = matchesCrisisRules(text);
     // A held-back message stays in the sender's own text box, so they can see what opened the sheet
     // and decide what to do with it; the room never receives it.
     if (!ruleHit) setDraft('');
@@ -167,26 +201,52 @@ export default function GroupRoomScreen({ route, navigation }: NativeStackScreen
       return;
     }
 
-    const withMine = append(messages, mine);
-    // The guide reads the room as it is shown, samples included when they are on screen.
-    const context = withSamples(withMine, devMode, screenshot);
-    void screenMessageRisk(mine.text).then((llmLevel) => {
+    setSending(true);
+    let id: string;
+    try {
+      id = await sendRoomMessage(groupId, text);
+    } catch (err) {
+      console.warn('Could not send group message:', err);
+      setDraft(text);
+      setError("Your message didn't send. Try again.");
+      return;
+    } finally {
+      setSending(false);
+    }
+    // screenMessageRisk is a no-op with "Use AI" off, so the keyword rules alone apply then.
+    void screenMessageRisk(text).then((llmLevel) => {
       if (llmLevel != null && llmLevel > combineRisk(ruleHit, null)) raise(llmLevel, 'llm');
     });
 
-    if (mentionsGuide(mine.text)) {
-      setGuideTyping(true);
-      const reply = await guideReply(group, context, mine);
-      setGuideTyping(false);
-      append(withMine, reply);
+    if (mentionsGuide(text) && !aiOn) {
+      setError(`${GUIDE_NAME} is off for you because "Use AI" is off in Settings, so it won't answer this message.`);
+    } else if (mentionsGuide(text)) {
+      setGuidePending(id);
+      requestGuideReply(groupId, id).catch((err) => {
+        console.warn('Guide could not answer:', err);
+        setGuidePending(null);
+        setError(`${GUIDE_NAME} couldn't answer right now. Try again in a moment.`);
+      });
     }
   };
 
   const askGuide = () => {
+    if (!aiOn) {
+      Alert.alert(
+        `${GUIDE_NAME} is off`,
+        `${GUIDE_NAME} is an artificial intelligence, so it only answers when "Use AI" is on in Settings. ` +
+          `With it off, your messages are never sent to the AI, even when others ask ${GUIDE_NAME}.`,
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => navigation.navigate('Settings') },
+        ]
+      );
+      return;
+    }
     if (!mentionsGuide(draft)) setDraft((d) => `@${GUIDE_NAME} ${d}`);
   };
 
-  // Kept low-key on purpose: leaving is rare, so it is a small link here rather than a button on every group card.
+  // Kept low-key on purpose: leaving is rare, so it is a small header link rather than a button on every group card.
   const leave = () => {
     if (isPeerCommunity) {
       void usePeerCommunities.getState().leave(groupId);
@@ -194,19 +254,44 @@ export default function GroupRoomScreen({ route, navigation }: NativeStackScreen
       const { ids, toggle } = useJoinedGroups.getState();
       if (ids.includes(groupId)) void toggle(groupId);
     }
-    void clearRoom(groupId);
+    leaveRoom(groupId).catch((err) => console.warn('Could not leave group room:', err));
     // No calendar permission means no way to reach back in and remove the event, so say so.
     Alert.alert('Left this group', 'If you added it to your calendar, delete it there too.');
     navigation.goBack();
   };
 
-  const shown = messages === null ? null : withSamples(messages, devMode, screenshot);
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable onPress={leave} accessibilityRole="button" hitSlop={8}>
+          <Text style={styles.leave}>Leave</Text>
+        </Pressable>
+      ),
+    });
+    // `leave` only reads the group id and kind, so rebinding on those is enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation, groupId, isPeerCommunity]);
+
+  const shown = messages === null ? null : withScreenshotSamples(messages, screenshot);
   const empty = shown !== null && shown.length === 0;
+  const memberSub = screenshot
+    ? '6 others'
+    : others.length === 0
+      ? 'Just you so far'
+      : `${others.length} ${others.length === 1 ? 'other' : 'others'}`;
 
   if (!group) {
     return (
       <View style={styles.center}>
         <Text style={styles.note}>This group is no longer listed.</Text>
+      </View>
+    );
+  }
+
+  if (!isRoomAvailable()) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.note}>Group chat needs a connection to MoodSense, which this build does not have.</Text>
       </View>
     );
   }
@@ -220,22 +305,21 @@ export default function GroupRoomScreen({ route, navigation }: NativeStackScreen
       <View style={styles.members}>
         <View style={styles.participants}>
           <Participant icon="person" label={pseudonymFor(uid)} sub="You" tint={colors.primarySoft} />
-          <Participant icon="sparkles" label={GUIDE_NAME} sub="Artificial Intelligence" tint={colors.indigoSoft} />
-          <Participant icon="people" label="Members" sub={group.name} tint={colors.surface} />
+          <Participant
+            icon="sparkles"
+            label={GUIDE_NAME}
+            sub={aiOn || screenshot ? 'Artificial Intelligence' : 'Off for you'}
+            tint={colors.indigoSoft}
+          />
+          <Participant icon="people" label="Members" sub={memberSub} tint={colors.surface} />
         </View>
-        {/* Screenshot mode drops the notice so a figure shows only the room; the Guide row above
-            still labels the assistant as an artificial intelligence. */}
-        {!screenshot && (
-          <Text style={styles.notice}>
-            {devMode ? `Developer mode: ${SAMPLE_MEMBERS.join(', ')} are sample members. ` : ''}
-            Other members are not connected yet, so only {GUIDE_NAME} will reply. {GUIDE_NAME} is an artificial intelligence,
-            not a counselor, and answers when you write @{GUIDE_NAME}. {crisis.inlineLine}{' '}
-            <Text style={styles.leave} accessibilityRole="button" onPress={leave}>
-              Leave group
-            </Text>
-          </Text>
-        )}
       </View>
+
+      {error && (
+        <Pressable style={styles.error} onPress={() => setError(null)} accessibilityRole="alert">
+          <Text style={styles.errorText}>{error}</Text>
+        </Pressable>
+      )}
 
       {shown === null ? (
         <ActivityIndicator style={styles.flex} color={colors.primary} />
@@ -244,18 +328,24 @@ export default function GroupRoomScreen({ route, navigation }: NativeStackScreen
           ref={list}
           style={styles.flex}
           contentContainerStyle={styles.list}
-          data={empty ? [guideWelcome(pseudonymFor(uid))] : shown}
+          data={empty ? [guideWelcome(pseudonymFor(uid), aiOn)] : shown}
           keyExtractor={(m) => m.id}
           renderItem={({ item }) => <Bubble message={item} mine={item.kind === 'member' && item.uid === uid} />}
           onContentSizeChange={() => list.current?.scrollToEnd({ animated: false })}
-          ListFooterComponent={guideTyping ? <Text style={styles.typing}>{GUIDE_NAME} is writing…</Text> : null}
+          ListFooterComponent={guidePending ? <Text style={styles.typing}>{GUIDE_NAME} is writing…</Text> : null}
         />
       )}
 
       <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Ask ${GUIDE_NAME}, the artificial intelligence`} onPress={askGuide} hitSlop={6} style={styles.guideChip}>
-          <Ionicons name="sparkles" size={14} color={colors.indigo} />
-          <Text style={styles.guideChipText}>@{GUIDE_NAME}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={aiOn ? `Ask ${GUIDE_NAME}, the artificial intelligence` : `${GUIDE_NAME} is off. Use AI is off in Settings`}
+          onPress={askGuide}
+          hitSlop={6}
+          style={[styles.guideChip, !aiOn && styles.guideChipOff]}
+        >
+          <Ionicons name="sparkles" size={14} color={aiOn ? colors.indigo : colors.ink3} />
+          <Text style={[styles.guideChipText, !aiOn && { color: colors.ink3 }]}>@{GUIDE_NAME}</Text>
         </Pressable>
         <TextInput
           style={styles.input}
@@ -270,7 +360,7 @@ export default function GroupRoomScreen({ route, navigation }: NativeStackScreen
           accessibilityRole="button"
           accessibilityLabel="Send"
           onPress={() => void send()}
-          disabled={!draft.trim() || messages === null}
+          disabled={!draft.trim() || messages === null || sending}
           hitSlop={8}
         >
           <Ionicons name="send" size={22} color={draft.trim() ? colors.primaryDeep : colors.ink3} />
@@ -306,8 +396,7 @@ const styles = StyleSheet.create({
   },
   participantName: { ...type.caption, color: colors.ink, fontWeight: '700' },
   participantSub: { ...type.caption, color: colors.ink3 },
-  notice: { ...type.caption, color: colors.ink3 },
-  leave: { textDecorationLine: 'underline' },
+  leave: { ...type.caption, color: colors.ink3 },
   list: { padding: spacing.lg, gap: spacing.md, flexGrow: 1 },
   typing: { ...type.caption, color: colors.indigo, marginTop: spacing.sm },
   bubbleRow: { alignItems: 'flex-start', maxWidth: '85%', gap: 2 },
@@ -340,6 +429,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.indigoSoft,
     marginBottom: 4,
   },
+  guideChipOff: { backgroundColor: colors.surface2 },
+  error: { marginHorizontal: spacing.md, marginTop: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.roseSoft },
+  errorText: { ...type.caption, color: colors.ink },
   guideChipText: { ...type.caption, color: colors.indigo, fontWeight: '700' },
   input: {
     ...type.body,
