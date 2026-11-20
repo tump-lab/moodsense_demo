@@ -19,7 +19,7 @@ feel.
 ## Try the app
 
 - **Android (arm64, Android 8+):** download
-  [`apk/MoodSense-android.apk`](apk/MoodSense-android.apk) and install it; allow installs from unknown sources if asked.
+  [`MoodSense-android.apk`](https://anonymous.4open.science/api/repo/moodsense-demo-7K3Q/file/apk/MoodSense-android.apk) and install it; allow installs from unknown sources if asked.
 - **iOS:** install [TestFlight](https://apps.apple.com/app/testflight/id899247664)
   from the App Store, then open the public TestFlight link
   [testflight.apple.com/join/NVpfj4MK](https://testflight.apple.com/join/NVpfj4MK)
