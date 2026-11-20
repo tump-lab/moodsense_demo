@@ -47,7 +47,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package && (test \"$(uname)\" != Darwin || bash node_modules/expo-modules-jsi/apple/scripts/create-stub-xcframework.sh)",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
